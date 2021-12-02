@@ -10,7 +10,7 @@ const (
 //对象池？
 type TimeNode struct {
 	delayTime  int64
-	originTime int64
+	expireTime int64
 	signalChan chan struct{}
 	timerType  TimerType //定时任务还是延迟任务
 }

@@ -5,7 +5,6 @@ import (
 	"time"
 )
 
-
 type TimeWheel struct {
 	wheelSize                int64
 	tickMs                   int64
@@ -57,10 +56,16 @@ func (t *TimeWheel) Start() {
 }
 
 func (t *TimeWheel) addTimerNode(node *TimeNode) {
+	if node.expireTime <= t.currentTime {
+		//这个节点过期了
+		node.signalChan <- struct{}{}
+		return
+	}
+	remainTme := node.expireTime - t.currentTime
 	//判断
-	if node.delayTime < t.tickMs*t.wheelSize {
+	if remainTme < t.tickMs*t.wheelSize {
 		//封装节点
-		slot := (node.delayTime/t.tickMs + t.slot) % t.wheelSize
+		slot := (remainTme/t.tickMs + t.slot) % t.wheelSize
 		nodeList := t.bucket[slot]
 		if nodeList == nil {
 			nodeList = &TimeNodeList{TimerNodeList: make([]*TimeNode, 0, t.wheelSize)}
@@ -101,9 +106,7 @@ func (t *TimeWheel) signalLowerWheel() {
 	if nodeList == nil || len(nodeList.TimerNodeList) == 0 {
 		return
 	}
-	for _, node := range nodeList.TimerNodeList {
-		node.delayTime = node.delayTime - t.tickMs
-	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 	select {
@@ -127,6 +130,9 @@ func (t *TimeWheel) signalCaller() {
 		if node.timerType == DelayTimerNode {
 			continue
 		}
+		//重新构建节点
+		node.expireTime = t.currentTime + node.delayTime
+		t.addTimerNode(node)
 		//close(node.signalChan)
 	}
 	nodeList.TimerNodeList = make([]*TimeNode, 0, t.wheelSize)

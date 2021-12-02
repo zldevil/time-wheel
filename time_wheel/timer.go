@@ -56,7 +56,13 @@ func TickTimer(d time.Duration) (chan struct{}, error) {
 
 func buildTimeNode(triggerType TimerType, duration int64) *TimeNode {
 	//计算到期时间
-	node := &TimeNode{delayTime: duration, signalChan: make(chan struct{}, 1), timerType: triggerType}
+	expireTime := time.Now().Unix() + duration
+	node := &TimeNode{
+		delayTime:  duration,
+		signalChan: make(chan struct{}, 1),
+		timerType:  triggerType,
+		expireTime: expireTime,
+	}
 	return node
 }
 
