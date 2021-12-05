@@ -15,6 +15,7 @@ var (
 
 const (
 	FormatDateTime = "2006-01-02 15:04:05"
+	FormatDate     = "2006-01-02"
 )
 
 func Init(tickMs int64, wheelSize int64) {
@@ -51,6 +52,20 @@ func TickTimer(d time.Duration) (chan struct{}, error) {
 		return nil, fmt.Errorf("时间转换错误")
 	}
 	node := buildTimeNode(TickTimerNode, duration)
+	node.refreshHandler = &internalCycle{delayTime: node.delayTime}
+	node.refreshHandler.Refresh()
+	return addNode(node)
+}
+
+func TickTimerStr(s string, opt []time.Weekday) (chan struct{}, error) {
+	_, err := time.ParseInLocation(" 15:04:05", s, time.Local)
+	if err != nil {
+		return nil, err
+	}
+
+	node := buildTimeNode(TickTimerNode, 0)
+	node.refreshHandler = &unixCycle{expireStr: s, opt: opt}
+	node.refreshHandler.Refresh()
 	return addNode(node)
 }
 

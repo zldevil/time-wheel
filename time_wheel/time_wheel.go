@@ -2,6 +2,7 @@ package time_wheel
 
 import (
 	"context"
+	"fmt"
 	"time"
 )
 
@@ -56,8 +57,8 @@ func (t *TimeWheel) Start() {
 }
 
 func (t *TimeWheel) addTimerNode(node *TimeNode) {
+	//这个节点过期了
 	if node.expireTime <= t.currentTime {
-		//这个节点过期了
 		node.signalChan <- struct{}{}
 		return
 	}
@@ -112,7 +113,7 @@ func (t *TimeWheel) signalLowerWheel() {
 	select {
 	case t.receiveOverFlowWheelChan <- nodeList:
 	case <-ctx.Done():
-		//err
+		fmt.Println("channel timeout")
 	}
 
 	t.bucket[t.slot] = &TimeNodeList{TimerNodeList: make([]*TimeNode, 0, t.wheelSize)}
@@ -130,8 +131,7 @@ func (t *TimeWheel) signalCaller() {
 		if node.timerType == DelayTimerNode {
 			continue
 		}
-		//重新构建节点
-		node.expireTime = t.currentTime + node.delayTime
+		node.expireTime, node.expireTime = node.refreshHandler.Refresh()
 		t.addTimerNode(node)
 		//close(node.signalChan)
 	}
