@@ -19,6 +19,7 @@ type TimeWheel struct {
 	NodeId2BucketMap         map[uint64]int64
 	currentTime              int64
 	round                    uint32
+	exit                     bool
 }
 
 func NewTimeWheel(slot int64, tickMs int64, wheelSize int64, startMs int64, round uint32, signalChan chan *TimeNodeList) *TimeWheel {
@@ -54,8 +55,25 @@ func (t *TimeWheel) Start() {
 				break
 			}
 			t.addTimerNode(node)
+		case cmd, ok := <-cmdChan:
+			if !ok {
+				return
+			}
+			cmd.run(t)
+		case <-quitChan:
+			t.stop()
+			return
 		}
 	}
+}
+
+func (t *TimeWheel) stop() {
+	t.tick.Stop()
+	//将通道中的命令保存
+}
+
+func (t *TimeWheel) loadNode() {
+	t.tick.Stop()
 }
 
 func (t *TimeWheel) addTimerNode(node *TimeNode) {

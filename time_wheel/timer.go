@@ -11,6 +11,8 @@ import (
 var (
 	timeWheel   *TimeWheel
 	receiveChan chan *TimeNode
+	cmdChan     chan cmd
+	quitChan    chan struct{}
 )
 
 const (
@@ -21,6 +23,8 @@ const (
 func Init(tickMs int64, wheelSize int64) {
 	timeWheel = NewTimeWheel(0, tickMs, wheelSize, time.Now().Unix(), 0, make(chan *TimeNodeList, wheelSize))
 	receiveChan = make(chan *TimeNode, 1024)
+	cmdChan = make(chan cmd, 1024)
+	quitChan = make(chan struct{}, 1)
 	timeWheel.Start()
 }
 
@@ -76,6 +80,16 @@ func TickTimerStr(s string, opt []time.Weekday) (chan struct{}, error) {
 	node.refreshHandler = &unixCycle{expireStr: s, opt: opt}
 	node.refreshHandler.Refresh()
 	return addNode(node)
+}
+func RemoveNode(nodeId uint64) {
+	cmd := &removeNodeCmd{nodeId: nodeId}
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	select {
+	case cmdChan <- cmd:
+	case <-ctx.Done():
+		return
+	}
 }
 
 func buildTimeNode(triggerType TimerType, duration int64) (*TimeNode, error) {
