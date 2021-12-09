@@ -2,6 +2,8 @@ package time_wheel
 
 import (
 	"fmt"
+	"github.com/sony/sonyflake"
+	"log"
 	"sort"
 	"time"
 )
@@ -28,8 +30,20 @@ type TimeNode struct {
 	delayTime      int64
 	expireTime     int64
 	signalChan     chan struct{}
+	NodeId         uint64
 	timerType      TimerType //定时任务还是延迟任务
 	refreshHandler NodeHandler
+}
+
+func buildNodeId() (uint64, error) {
+	flake := sonyflake.NewSonyflake(sonyflake.Settings{})
+	id, err := flake.NextID()
+	if err != nil {
+		log.Fatalf("flake.NextID() failed with %s\n", err)
+	}
+	// Note: this is base16, could shorten by encoding as base62 string
+	fmt.Printf("build NodeId :  %x\n", id)
+	return id, err
 }
 
 type NodeHandler interface {

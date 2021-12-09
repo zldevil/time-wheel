@@ -3,6 +3,7 @@ package time_wheel
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 )
 
@@ -14,9 +15,10 @@ type TimeWheel struct {
 	tick                     time.Ticker
 	overFlowWheel            *TimeWheel
 	receiveOverFlowWheelChan chan *TimeNodeList
-	//lock                     sync.RWMutex
-	currentTime int64
-	round       uint32
+	lock                     sync.RWMutex
+	NodeId2BucketMap         map[uint64]int64
+	currentTime              int64
+	round                    uint32
 }
 
 func NewTimeWheel(slot int64, tickMs int64, wheelSize int64, startMs int64, round uint32, signalChan chan *TimeNodeList) *TimeWheel {
@@ -74,6 +76,7 @@ func (t *TimeWheel) addTimerNode(node *TimeNode) {
 		}
 		//添加到bucket中
 		nodeList.TimerNodeList = append(nodeList.TimerNodeList, node)
+		t.NodeId2BucketMap[node.NodeId] = slot
 	} else {
 		if t.overFlowWheel == nil {
 			t.overFlowWheel = NewTimeWheel(0, t.tickMs*t.wheelSize, t.wheelSize, t.currentTime, t.round+1, t.receiveOverFlowWheelChan)
@@ -81,6 +84,29 @@ func (t *TimeWheel) addTimerNode(node *TimeNode) {
 		}
 		t.overFlowWheel.addTimerNode(node)
 	}
+}
+
+func (t *TimeWheel) removeNode(nodeId uint64) {
+	if t.NodeId2BucketMap == nil {
+		return
+	}
+	slot, ok := t.NodeId2BucketMap[nodeId]
+	if ok {
+		//删除bucket中对应的节点
+		nodeList := t.bucket[slot].TimerNodeList
+		for i := 0; i < len(nodeList); i++ {
+			if nodeList[i].NodeId != nodeId {
+				continue
+			}
+			nodeList = append(nodeList[0:i], nodeList[i+1:]...)
+		}
+		delete(t.NodeId2BucketMap, nodeId)
+		return
+	}
+	if t.overFlowWheel != nil {
+		t.overFlowWheel.removeNode(nodeId)
+	}
+
 }
 
 func (t *TimeWheel) advanceClock(timeMs int64) {
@@ -106,6 +132,10 @@ func (t *TimeWheel) signalLowerWheel() {
 	nodeList := t.bucket[t.slot]
 	if nodeList == nil || len(nodeList.TimerNodeList) == 0 {
 		return
+	}
+
+	for _, node := range nodeList.TimerNodeList {
+		delete(t.NodeId2BucketMap, node.NodeId)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)

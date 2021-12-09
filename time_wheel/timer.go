@@ -40,7 +40,10 @@ func AfterDurationStr(s string) (chan struct{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	node := buildTimeNode(DelayTimerNode, duration)
+	node, err := buildTimeNode(DelayTimerNode, duration)
+	if err != nil {
+		return nil, err
+	}
 	return addNode(node)
 }
 
@@ -51,7 +54,10 @@ func TickTimer(d time.Duration) (chan struct{}, error) {
 		//报错
 		return nil, fmt.Errorf("时间转换错误")
 	}
-	node := buildTimeNode(TickTimerNode, duration)
+	node, err := buildTimeNode(TickTimerNode, duration)
+	if err != nil {
+		return nil, err
+	}
 	node.refreshHandler = &internalCycle{delayTime: node.delayTime}
 	node.refreshHandler.Refresh()
 	return addNode(node)
@@ -63,22 +69,30 @@ func TickTimerStr(s string, opt []time.Weekday) (chan struct{}, error) {
 		return nil, err
 	}
 
-	node := buildTimeNode(TickTimerNode, 0)
+	node, err := buildTimeNode(TickTimerNode, 0)
+	if err != nil {
+		return nil, err
+	}
 	node.refreshHandler = &unixCycle{expireStr: s, opt: opt}
 	node.refreshHandler.Refresh()
 	return addNode(node)
 }
 
-func buildTimeNode(triggerType TimerType, duration int64) *TimeNode {
+func buildTimeNode(triggerType TimerType, duration int64) (*TimeNode, error) {
 	//计算到期时间
 	expireTime := time.Now().Unix() + duration
+	nodeId, err := buildNodeId()
+	if err != nil {
+		return nil, err
+	}
 	node := &TimeNode{
 		delayTime:  duration,
 		signalChan: make(chan struct{}, 1),
 		timerType:  triggerType,
 		expireTime: expireTime,
+		NodeId:     nodeId,
 	}
-	return node
+	return node, err
 }
 
 func addNode(node *TimeNode) (chan struct{}, error) {
