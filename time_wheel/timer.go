@@ -8,24 +8,47 @@ import (
 	"time"
 )
 
-var (
+/*var (
 	timeWheel   *TimeWheel
 	receiveChan chan *TimeNode
 	cmdChan     chan cmd
 	quitChan    chan struct{}
-)
+)*/
 
 const (
 	FormatDateTime = "2006-01-02 15:04:05"
 	FormatDate     = "2006-01-02"
 )
 
-func Init(tickMs int64, wheelSize int64) {
-	timeWheel = NewTimeWheel(0, tickMs, wheelSize, time.Now().Unix(), 0, make(chan *TimeNodeList, wheelSize))
-	receiveChan = make(chan *TimeNode, 1024)
-	cmdChan = make(chan cmd, 1024)
-	quitChan = make(chan struct{}, 1)
-	timeWheel.Start()
+type Timer struct {
+	timeWheel   *TimeWheel
+	receiveChan chan *TimeNode
+	cmdChan     chan cmd
+	quitChan    chan struct{}
+	exit        bool
+	tick        *time.Ticker
+}
+
+var timer *Timer
+
+func init() {
+	timer = &Timer{}
+}
+
+func (t *Timer) Start() {
+	//size和tickMs从配置文件中读取
+	ticker := time.NewTicker(10 * time.Millisecond)
+	t.timeWheel = NewTimeWheel(0, int64(10*time.Millisecond), Conf.WheelConfig.Size, time.Now().Unix(), 0, make(chan *TimeNodeList, wheelSize))
+	t.receiveChan = make(chan *TimeNode, 1024)
+	t.cmdChan = make(chan cmd, 1024)
+	t.quitChan = make(chan struct{}, 1)
+	t.tick = ticker
+	go t.timeWheel.Start(ticker, t.cmdChan, t.receiveChan, t.quitChan)
+}
+
+func (t *Timer) stop() {
+	t.tick.Stop()
+
 }
 
 func AfterTimer(d time.Duration) (chan struct{}, error) {
@@ -86,7 +109,7 @@ func RemoveNode(nodeId uint64) {
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 	select {
-	case cmdChan <- cmd:
+	case timer.cmdChan <- cmd:
 	case <-ctx.Done():
 		return
 	}
@@ -114,7 +137,7 @@ func addNode(node *TimeNode) (chan struct{}, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 	select {
-	case receiveChan <- node:
+	case timer.receiveChan <- node:
 		return node.signalChan, nil
 	case <-ctx.Done():
 		return nil, fmt.Errorf("")

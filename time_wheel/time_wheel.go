@@ -11,15 +11,13 @@ type TimeWheel struct {
 	wheelSize                int64
 	tickMs                   int64
 	slot                     int64
-	bucket                   []*TimeNodeList
-	tick                     time.Ticker
-	overFlowWheel            *TimeWheel
-	receiveOverFlowWheelChan chan *TimeNodeList
 	lock                     sync.RWMutex
 	NodeId2BucketMap         map[uint64]int64
 	currentTime              int64
 	round                    uint32
-	exit                     bool
+	bucket                   []*TimeNodeList
+	overFlowWheel            *TimeWheel
+	receiveOverFlowWheelChan chan *TimeNodeList
 }
 
 func NewTimeWheel(slot int64, tickMs int64, wheelSize int64, startMs int64, round uint32, signalChan chan *TimeNodeList) *TimeWheel {
@@ -35,9 +33,8 @@ func NewTimeWheel(slot int64, tickMs int64, wheelSize int64, startMs int64, roun
 	return timeWheel
 }
 
-func (t *TimeWheel) Start() {
+func (t *TimeWheel) Start(ticker *time.Ticker, cmdChan chan cmd, receiveChan chan *TimeNode, quitChan chan struct{}) {
 
-	ticker := time.NewTicker(time.Duration(t.tickMs))
 	for {
 		select {
 		case <-ticker.C:
@@ -68,12 +65,11 @@ func (t *TimeWheel) Start() {
 }
 
 func (t *TimeWheel) stop() {
-	t.tick.Stop()
-	//将通道中的命令保存
+
 }
 
 func (t *TimeWheel) loadNode() {
-	t.tick.Stop()
+
 }
 
 func (t *TimeWheel) addTimerNode(node *TimeNode) {
