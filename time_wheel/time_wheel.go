@@ -8,27 +8,29 @@ import (
 )
 
 type TimeWheel struct {
-	wheelSize                int64
-	tickMs                   int64
-	slot                     int64
-	lock                     sync.RWMutex
-	NodeId2BucketMap         map[uint64]int64
-	currentTime              int64
-	round                    uint32
-	bucket                   []*TimeNodeList
-	overFlowWheel            *TimeWheel
-	receiveOverFlowWheelChan chan *TimeNodeList
+	wheelSize            int64
+	tickMs               int64
+	slot                 int64
+	lock                 sync.RWMutex
+	Nodes                map[uint64]*TimeNode
+	currentTime          int64
+	round                uint32
+	bucket               []*NodeList
+	nextWheel            *TimeWheel
+	prevWheel            *TimeWheel
+	receivePrevWheelChan chan *NodeList
+	nodeCount            int32
 }
 
-func NewTimeWheel(slot int64, tickMs int64, wheelSize int64, startMs int64, round uint32, signalChan chan *TimeNodeList) *TimeWheel {
+func NewTimeWheel(slot int64, tickMs int64, wheelSize int64, startMs int64, round uint32, signalChan chan *NodeList) *TimeWheel {
 	timeWheel := &TimeWheel{
-		slot:                     slot,
-		tickMs:                   tickMs,
-		wheelSize:                wheelSize,
-		bucket:                   make([]*TimeNodeList, wheelSize),
-		currentTime:              startMs,
-		round:                    round,
-		receiveOverFlowWheelChan: signalChan,
+		slot:                 slot,
+		tickMs:               tickMs,
+		wheelSize:            wheelSize,
+		bucket:               make([]*NodeList, wheelSize),
+		currentTime:          startMs,
+		round:                round,
+		receivePrevWheelChan: signalChan,
 	}
 	return timeWheel
 }
@@ -39,14 +41,15 @@ func (t *TimeWheel) Start(ticker *time.Ticker, cmdChan chan cmd, receiveChan cha
 		select {
 		case <-ticker.C:
 			t.advanceClock(t.currentTime + t.tickMs)
-		case timeNodeList, ok := <-t.receiveOverFlowWheelChan:
+		case nodeList, ok := <-t.receivePrevWheelChan:
 			if !ok {
 				break
 			}
 			//降级逻辑
-			for _, node := range timeNodeList.TimerNodeList {
+			nodeList.foreachNode(func(node *TimeNode) {
 				t.addTimerNode(node)
-			}
+			})
+
 		case node, ok := <-receiveChan:
 			if !ok {
 				break
@@ -62,10 +65,6 @@ func (t *TimeWheel) Start(ticker *time.Ticker, cmdChan chan cmd, receiveChan cha
 			return
 		}
 	}
-}
-
-func (t *TimeWheel) stop() {
-
 }
 
 func (t *TimeWheel) loadNode() {
@@ -85,42 +84,61 @@ func (t *TimeWheel) addTimerNode(node *TimeNode) {
 		slot := (remainTme/t.tickMs + t.slot) % t.wheelSize
 		nodeList := t.bucket[slot]
 		if nodeList == nil {
-			nodeList = &TimeNodeList{TimerNodeList: make([]*TimeNode, 0, t.wheelSize)}
+			nodeList = &NodeList{timeWheel: t}
 			t.bucket[slot] = nodeList
 		}
 		//添加到bucket中
-		nodeList.TimerNodeList = append(nodeList.TimerNodeList, node)
-		t.NodeId2BucketMap[node.NodeId] = slot
+		nodeList.putNode(node)
+		//nodeList.TimerNodeList = append(nodeList.TimerNodeList, node)
+		t.Nodes[node.NodeId] = node
+		//t.NodeId2BucketMap[node.NodeId] = slot
 	} else {
-		if t.overFlowWheel == nil {
-			t.overFlowWheel = NewTimeWheel(0, t.tickMs*t.wheelSize, t.wheelSize, t.currentTime, t.round+1, t.receiveOverFlowWheelChan)
-			t.overFlowWheel.receiveOverFlowWheelChan = t.receiveOverFlowWheelChan
+		if t.nextWheel == nil {
+			t.nextWheel = NewTimeWheel(0, t.tickMs*t.wheelSize, t.wheelSize, t.currentTime, t.round+1, t.receivePrevWheelChan)
+			t.nextWheel.receivePrevWheelChan = t.receivePrevWheelChan
 		}
-		t.overFlowWheel.addTimerNode(node)
+		t.nextWheel.addTimerNode(node)
 	}
 }
 
 func (t *TimeWheel) removeNode(nodeId uint64) {
-	if t.NodeId2BucketMap == nil {
+	if t.Nodes == nil {
 		return
-	}
-	slot, ok := t.NodeId2BucketMap[nodeId]
-	if ok {
-		//删除bucket中对应的节点
-		nodeList := t.bucket[slot].TimerNodeList
-		for i := 0; i < len(nodeList); i++ {
-			if nodeList[i].NodeId != nodeId {
-				continue
-			}
-			nodeList = append(nodeList[0:i], nodeList[i+1:]...)
-		}
-		delete(t.NodeId2BucketMap, nodeId)
-		return
-	}
-	if t.overFlowWheel != nil {
-		t.overFlowWheel.removeNode(nodeId)
 	}
 
+	var (
+		ok       bool
+		nodeList *NodeList
+		node     *TimeNode
+	)
+	if node, ok = t.Nodes[nodeId]; ok {
+		nodeList = node.nodeList
+		if node.NodeId == nodeId {
+			delete(t.Nodes, nodeId)
+		}
+		if nodeList != nil && nodeList.removeNode(node) {
+			t.removeTimeWheel()
+		}
+	} else if t.nextWheel != nil {
+		t.nextWheel.removeNode(nodeId)
+	}
+
+}
+func (t *TimeWheel) removeTimeWheel() {
+	if t.round == 1 {
+		return
+	}
+	if t.nextWheel == nil && t.prevWheel == nil {
+		return
+	}
+
+	if t.nextWheel != nil {
+		t.prevWheel.nextWheel = t.nextWheel
+	}
+	t.prevWheel.nextWheel = t.nextWheel
+	t.prevWheel = nil
+	t.nextWheel = nil
+	t.stop()
 }
 
 func (t *TimeWheel) advanceClock(timeMs int64) {
@@ -135,76 +153,58 @@ func (t *TimeWheel) advanceClock(timeMs int64) {
 	}
 	t.slot = (t.slot + 1) % t.wheelSize
 
-	if t.overFlowWheel == nil {
+	if t.nextWheel == nil {
 		return
 	}
-	t.overFlowWheel.advanceClock(timeMs)
+	t.nextWheel.advanceClock(timeMs)
 }
 
 func (t *TimeWheel) signalLowerWheel() {
 
 	nodeList := t.bucket[t.slot]
-	if nodeList == nil || len(nodeList.TimerNodeList) == 0 {
+	if nodeList == nil || nodeList.root == nil {
 		return
 	}
+	rootNode := nodeList.root
 
-	for _, node := range nodeList.TimerNodeList {
-		delete(t.NodeId2BucketMap, node.NodeId)
+	hand := func(node *TimeNode) {
+		delete(t.Nodes, node.NodeId)
 	}
-
+	nodeList.foreachNode(hand)
+	//nodeList.flush()
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 	select {
-	case t.receiveOverFlowWheelChan <- nodeList:
+	case t.receivePrevWheelChan <- &NodeList{root: rootNode}:
+		t.bucket[t.slot] = &NodeList{timeWheel: t, root: nil}
 	case <-ctx.Done():
 		fmt.Println("channel timeout")
 	}
 
-	t.bucket[t.slot] = &TimeNodeList{TimerNodeList: make([]*TimeNode, 0, t.wheelSize)}
 }
 
 func (t *TimeWheel) signalCaller() {
 	nodeList := t.bucket[t.slot]
-	if nodeList == nil || len(nodeList.TimerNodeList) == 0 {
+	if nodeList == nil || nodeList.root == nil {
 		return
 	}
+	t.bucket[t.slot] = &NodeList{timeWheel: t, root: nil}
 
-	for _, node := range nodeList.TimerNodeList {
+	hand := func(node *TimeNode) {
 		node.signalChan <- struct{}{}
+		delete(t.Nodes, node.NodeId)
 		//node如果是tick类型，需要重复加入队列中
-		if node.timerType == DelayTimerNode {
-			continue
+		if node.timerType == TickTimerNode {
+			node.expireTime, node.expireTime = node.refreshHandler.Refresh()
+			t.addTimerNode(node)
 		}
-		node.expireTime, node.expireTime = node.refreshHandler.Refresh()
-		t.addTimerNode(node)
-		//close(node.signalChan)
+
 	}
-	nodeList.TimerNodeList = make([]*TimeNode, 0, t.wheelSize)
+	nodeList.foreachNode(hand)
+
+	//nodeList.r = make([]*TimeNode, 0, t.wheelSize)
 }
 
-func (t *TimeWheel) afterTime(duration int64) (chan struct{}, error) {
+func (t *TimeWheel) stop() {
 
-	//判断时间是否超出当前时间轮的最大时间
-	/*	t.lock.Lock()
-		defer t.lock.Unlock()*/
-
-	if duration < t.tickMs*t.wheelSize {
-		//封装节点
-		node := &TimeNode{delayTime: duration, signalChan: make(chan struct{}, 1), timerType: 1}
-		slot := (duration/t.tickMs + t.slot) % t.wheelSize
-		nodeList := t.bucket[slot]
-		if nodeList == nil {
-			nodeList = &TimeNodeList{TimerNodeList: make([]*TimeNode, 0, t.wheelSize)}
-			t.bucket[slot-1] = nodeList
-		}
-		//添加到bucket中
-		nodeList.TimerNodeList = append(nodeList.TimerNodeList, node)
-		//计算slot
-		return node.signalChan, nil
-	} else {
-		if t.overFlowWheel == nil {
-			t.overFlowWheel = NewTimeWheel(0, t.tickMs*t.wheelSize, t.wheelSize, t.currentTime, t.round+1, t.receiveOverFlowWheelChan)
-		}
-		return t.overFlowWheel.afterTime(duration)
-	}
 }

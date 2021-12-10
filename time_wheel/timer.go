@@ -8,13 +8,6 @@ import (
 	"time"
 )
 
-/*var (
-	timeWheel   *TimeWheel
-	receiveChan chan *TimeNode
-	cmdChan     chan cmd
-	quitChan    chan struct{}
-)*/
-
 const (
 	FormatDateTime = "2006-01-02 15:04:05"
 	FormatDate     = "2006-01-02"
@@ -38,7 +31,7 @@ func init() {
 func (t *Timer) Start() {
 	//size和tickMs从配置文件中读取
 	ticker := time.NewTicker(10 * time.Millisecond)
-	t.timeWheel = NewTimeWheel(0, int64(10*time.Millisecond), Conf.WheelConfig.Size, time.Now().Unix(), 0, make(chan *TimeNodeList, wheelSize))
+	t.timeWheel = NewTimeWheel(0, int64(10*time.Millisecond), Conf.WheelConfig.Size, time.Now().Unix(), 0, make(chan *NodeList, Conf.WheelConfig.Size))
 	t.receiveChan = make(chan *TimeNode, 1024)
 	t.cmdChan = make(chan cmd, 1024)
 	t.quitChan = make(chan struct{}, 1)

@@ -5,6 +5,7 @@ import (
 	"github.com/sony/sonyflake"
 	"log"
 	"sort"
+	"sync"
 	"time"
 )
 
@@ -31,8 +32,11 @@ type TimeNode struct {
 	expireTime     int64
 	signalChan     chan struct{}
 	NodeId         uint64
-	timerType      TimerType //定时任务还是延迟任务
+	timerType      TimerType
 	refreshHandler NodeHandler
+	next           *TimeNode
+	prev           *TimeNode
+	nodeList       *NodeList
 }
 
 func buildNodeId() (uint64, error) {
@@ -108,8 +112,57 @@ func (u *unixCycle) Refresh() (int64, int64) {
 	return expireTime, delayTime
 }
 
-type TimeNodeList struct {
-	TimerNodeList []*TimeNode //后续可能改成链表结构
+type NodeList struct {
+	//TimerNodeList []*TimeNode //后续可能改成链表结构
+	root      *TimeNode
+	timeWheel *TimeWheel
+	lock      sync.RWMutex
 }
 
-//封装链表方法
+func (t *NodeList) putNode(node *TimeNode) {
+
+	if t.root != nil {
+		t.root.prev = node
+	}
+	node.next = t.root
+	node.prev = nil
+	t.root = node
+	t.timeWheel.nodeCount++
+}
+
+func (t *NodeList) removeNode(node *TimeNode) bool {
+	if node.prev == nil && node.next == nil {
+		return false
+	}
+	if node.next != nil {
+		node.next.prev = node.prev
+	}
+	if node.prev != nil {
+
+	}
+	if node.prev != nil {
+		// if not header
+		node.prev.next = node.next
+	} else {
+		t.root = node.next
+	}
+	node.next = nil
+	node.prev = nil
+	t.timeWheel.nodeCount--
+	if t.timeWheel.nodeCount == 0 {
+		return true
+	}
+	return false
+}
+
+func (t *NodeList) foreachNode(handler func(node *TimeNode)) {
+	for ch := t.root; ch != nil; ch = ch.next {
+		handler(ch)
+	}
+}
+
+func (t *NodeList) flush() {
+	for node := t.root; node != nil; node = node.next {
+		t.removeNode(node)
+	}
+}

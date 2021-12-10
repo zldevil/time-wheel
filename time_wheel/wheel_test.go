@@ -8,15 +8,16 @@ import (
 )
 
 func TestWheel(t *testing.T) {
-	timeWheel := NewTimeWheel(0, int64(1*time.Second), 10, time.Now().Unix(), 0, make(chan *TimeNodeList, 10))
+	timeWheel := NewTimeWheel(0, int64(1*time.Second), 10, time.Now().Unix(), 0, make(chan *NodeList, 10))
 	cur := time.Now().Unix()
 	go timeWheel.Start()
-	c, _ := timeWheel.afterTime(int64(15 * time.Second))
-	s := fmt.Sprint(c)
+	node := &TimeNode{signalChan: make(chan struct{}, 1)}
+	timeWheel.addTimerNode(node)
+	s := fmt.Sprint(node)
 	t.Log(s)
 	for {
 		select {
-		case <-c:
+		case <-node.signalChan:
 			cur1 := time.Now().Unix()
 			sub := cur1 - cur
 			t.Log(sub)
