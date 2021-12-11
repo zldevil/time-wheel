@@ -10,14 +10,14 @@ import (
 func TestWheel(t *testing.T) {
 	timeWheel := NewTimeWheel(0, int64(1*time.Second), 10, time.Now().Unix(), 0, make(chan *NodeList, 10))
 	cur := time.Now().Unix()
-	go timeWheel.Start()
-	node := &TimeNode{signalChan: make(chan struct{}, 1)}
+	go timeWheel.ProcMsg()
+	node := &TimeNode{SignalChan: make(chan struct{}, 1)}
 	timeWheel.addTimerNode(node)
 	s := fmt.Sprint(node)
 	t.Log(s)
 	for {
 		select {
-		case <-node.signalChan:
+		case <-node.SignalChan:
 			cur1 := time.Now().Unix()
 			sub := cur1 - cur
 			t.Log(sub)

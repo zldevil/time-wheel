@@ -1,4 +1,4 @@
-package time_wheel
+package conf
 
 import (
 	"flag"

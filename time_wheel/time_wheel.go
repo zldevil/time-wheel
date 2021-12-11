@@ -19,6 +19,7 @@ type TimeWheel struct {
 	nextWheel            *TimeWheel
 	prevWheel            *TimeWheel
 	receivePrevWheelChan chan *NodeList
+	receiveChan          chan cmd
 	nodeCount            int32
 }
 
@@ -35,7 +36,7 @@ func NewTimeWheel(slot int64, tickMs int64, wheelSize int64, startMs int64, roun
 	return timeWheel
 }
 
-func (t *TimeWheel) Start(ticker *time.Ticker, cmdChan chan cmd, receiveChan chan *TimeNode, quitChan chan struct{}) {
+func (t *TimeWheel) ProcMsg(ticker *time.Ticker, cmdChan chan cmd, receiveChan chan *TimeNode, quitChan chan struct{}) {
 
 	for {
 		select {
@@ -73,11 +74,11 @@ func (t *TimeWheel) loadNode() {
 
 func (t *TimeWheel) addTimerNode(node *TimeNode) {
 	//这个节点过期了
-	if node.expireTime <= t.currentTime {
-		node.signalChan <- struct{}{}
+	if node.ExpireTime <= t.currentTime {
+		node.SignalChan <- struct{}{}
 		return
 	}
-	remainTme := node.expireTime - t.currentTime
+	remainTme := node.ExpireTime - t.currentTime
 	//判断
 	if remainTme < t.tickMs*t.wheelSize {
 		//封装节点
@@ -117,7 +118,7 @@ func (t *TimeWheel) removeNode(nodeId uint64) {
 			delete(t.Nodes, nodeId)
 		}
 		if nodeList != nil && nodeList.removeNode(node) {
-			t.removeTimeWheel()
+			//t.removeTimeWheel()
 		}
 	} else if t.nextWheel != nil {
 		t.nextWheel.removeNode(nodeId)
@@ -191,14 +192,13 @@ func (t *TimeWheel) signalCaller() {
 	t.bucket[t.slot] = &NodeList{timeWheel: t, root: nil}
 
 	hand := func(node *TimeNode) {
-		node.signalChan <- struct{}{}
+		node.SignalChan <- struct{}{}
 		delete(t.Nodes, node.NodeId)
 		//node如果是tick类型，需要重复加入队列中
-		if node.timerType == TickTimerNode {
-			node.expireTime, node.expireTime = node.refreshHandler.Refresh()
+		if node.TimerType == TickTimerNode {
+			node.ExpireTime, node.ExpireTime = node.RefreshHandler.Refresh()
 			t.addTimerNode(node)
 		}
-
 	}
 	nodeList.foreachNode(hand)
 
